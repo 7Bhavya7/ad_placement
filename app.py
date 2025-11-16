@@ -1,4 +1,3 @@
-# app.py — FIXED VERSION (Weights-only loading)
 import streamlit as st
 st.set_page_config(page_title="🎬 Smart Ad Placement", layout="wide", initial_sidebar_state="expanded")
 
@@ -14,7 +13,6 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
-# ============== CONFIG ==============
 MODEL_PATH = r"bilstm_ad_model.weights.h55"
 WEIGHTS_PATH = r"bilstm_ad_model.weights.h5"
 TOKENIZER_PATH = r"tokenizer.pkl"
@@ -34,11 +32,11 @@ def build_model_architecture():
     """Recreate exact model architecture (same as training)"""
     available_numeric_cols = ['norm_gap', 'norm_duration', 'is_sentence_end', 'has_music_tag', 'is_shouting']
     
-    # Input layers
+
     text_input = Input(shape=(MAX_LEN,), name="text_input")
     num_input = Input(shape=(len(available_numeric_cols),), name="num_input")
     
-    # Text branch - BiLSTM
+
     x = Embedding(
         input_dim=VOCAB_SIZE,
         output_dim=128,
@@ -58,7 +56,7 @@ def build_model_architecture():
     
     x = Dropout(0.4, name="dropout_text")(x)
     
-    # Numeric branch
+
     y = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_num_1")(num_input)
     y = Dropout(0.3, name="dropout_num_1")(y)
@@ -66,10 +64,10 @@ def build_model_architecture():
               name="dense_num_2")(y)
     y = Dropout(0.2, name="dropout_num_2")(y)
     
-    # Merge
+
     combined = Concatenate(name="merge")([x, y])
     
-    # Dense layers
+
     z = Dense(128, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_combined_1")(combined)
     z = Dropout(0.4, name="dropout_combined_1")(z)
@@ -115,7 +113,7 @@ def load_model_and_tokenizer():
             st.success("✅ Model loaded (Method 1: Full .h5)!")
             return model, tokenizer
         except Exception as e:
-            st.warning(f"⚠️ Method 1 failed: {e}")
+            st.warning(f" Method 1 failed: {e}")
     
     # Method 2: Build architecture + load weights
     if os.path.exists(WEIGHTS_PATH):
@@ -554,4 +552,4 @@ else:
         )
 
 st.markdown("---")
-st.caption("🚀 Built with BiLSTM + Streamlit | © 2025 Ad Placement AI")
+st.caption("Built with BiLSTM + Streamlit")
