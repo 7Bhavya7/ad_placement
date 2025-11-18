@@ -4,5 +4,6 @@ numpy
 tensorflow
 matplotlib
 scikit-learn
-youtube-transcript-api==0.6.2
-yt-dlp==2024.10.7
+youtube-transcript-api
+yt-dlp
+requests
