@@ -15,9 +15,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============== CONFIG ==============
-MODEL_PATH = r"bilstm_ad_model.h5"
-WEIGHTS_PATH = r"bilstm_ad_model.weights.h5"
-TOKENIZER_PATH = r"tokenizer.pkl"
+MODEL_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.h5"
+WEIGHTS_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.weights.h5"
+TOKENIZER_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\tokenizer.pkl"
 VOCAB_SIZE = 8000
 MAX_LEN = 25
 
@@ -523,7 +523,12 @@ def compute_features(df):
     df["norm_gap"] = np.clip(df["gap"] / 6.0, 0, 1)
     df["norm_duration"] = np.clip(df["duration"] / 5.0, 0, 1)
     
-
+    df["ad_score"] = (
+        0.4 * df["norm_gap"] + 
+        0.2 * df["is_sentence_end"] + 
+        0.2 * df["has_music_tag"] - 
+        0.2 * df["is_shouting"]
+    ).clip(0, 1)
     
     return df
 
@@ -693,7 +698,7 @@ with tab2:
         else:
             st.info(f"🎥 Video ID: `{video_id}`")
             
-            with st.spinner("⏳ Fetching subtitles..."):
+            with st.spinner("⏳ Fetching subtitles (trying 3 methods sequentially)..."):
                 df, method = youtube_to_dataframe(video_id)
             
             if df is None:
@@ -789,6 +794,7 @@ else:
             'Ad Time': sec_to_time(t),
             'Seconds': round(float(t), 2),
             'Model Prob': f"{float(row['prob']):.3f}",
+
             'Text': row['text'][:50] + "..." if len(str(row['text'])) > 50 else row['text']
         })
     
