@@ -1,4 +1,4 @@
-# app.py — FIXED VERSION with Proper YouTube Subtitle Extraction
+# app.py — FIXED VERSION with Proper YouTube Subtitle Extraction (No External Libs for Subtitles)
 import streamlit as st
 st.set_page_config(page_title="🎬 Smart Ad Placement", layout="wide", initial_sidebar_state="expanded")
 
@@ -15,9 +15,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============== CONFIG ==============
-MODEL_PATH = r"bilstm_ad_model.h5"
-WEIGHTS_PATH = r"bilstm_ad_model.weights.h5"
-TOKENIZER_PATH = r"tokenizer.pkl"
+MODEL_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.h5"
+WEIGHTS_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.weights.h5"
+TOKENIZER_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\tokenizer.pkl"
 VOCAB_SIZE = 8000
 MAX_LEN = 25
 
@@ -33,11 +33,11 @@ WINDOW_MAX = 3
 def build_model_architecture():
     """Recreate exact model architecture (same as training)"""
     available_numeric_cols = ['norm_gap', 'norm_duration', 'is_sentence_end', 'has_music_tag', 'is_shouting']
-    
+   
     # Input layers
     text_input = Input(shape=(MAX_LEN,), name="text_input")
     num_input = Input(shape=(len(available_numeric_cols),), name="num_input")
-    
+   
     # Text branch - BiLSTM
     x = Embedding(
         input_dim=VOCAB_SIZE,
@@ -45,19 +45,19 @@ def build_model_architecture():
         mask_zero=True,
         name="embedding"
     )(text_input)
-    
+   
     x = Bidirectional(
         LSTM(128, return_sequences=True, dropout=0.3, recurrent_dropout=0.3,
              kernel_regularizer=regularizers.l2(1e-4), name="bilstm_1")
     )(x)
-    
+   
     x = Bidirectional(
         LSTM(64, return_sequences=False, dropout=0.3, recurrent_dropout=0.3,
              kernel_regularizer=regularizers.l2(1e-4), name="bilstm_2")
     )(x)
-    
+   
     x = Dropout(0.4, name="dropout_text")(x)
-    
+   
     # Numeric branch
     y = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_num_1")(num_input)
@@ -65,10 +65,10 @@ def build_model_architecture():
     y = Dense(32, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_num_2")(y)
     y = Dropout(0.2, name="dropout_num_2")(y)
-    
+   
     # Merge
     combined = Concatenate(name="merge")([x, y])
-    
+   
     # Dense layers
     z = Dense(128, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_combined_1")(combined)
@@ -76,10 +76,10 @@ def build_model_architecture():
     z = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(1e-4),
               name="dense_combined_2")(z)
     z = Dropout(0.3, name="dropout_combined_2")(z)
-    
+   
     # Output
     output = Dense(1, activation='sigmoid', name="output")(z)
-    
+   
     model = tf.keras.Model(inputs=[text_input, num_input], outputs=output)
     return model
 
@@ -87,12 +87,12 @@ def build_model_architecture():
 @st.cache_resource(show_spinner=False)
 def load_model_and_tokenizer():
     """Load model and tokenizer with fallback options"""
-    
+   
     if not os.path.exists(TOKENIZER_PATH):
         st.error(f"❌ Tokenizer not found: {TOKENIZER_PATH}")
         st.error(f"Current directory: {os.getcwd()}")
         st.stop()
-    
+   
     try:
         with open(TOKENIZER_PATH, 'rb') as f:
             tokenizer = pickle.load(f)
@@ -100,11 +100,10 @@ def load_model_and_tokenizer():
     except Exception as e:
         st.error(f"❌ Failed to load tokenizer: {e}")
         st.stop()
-    
+   
     model = None
-    
-
-    
+   
+   
     if os.path.exists(WEIGHTS_PATH):
         try:
             st.info("⏳ Loading model")
@@ -114,7 +113,7 @@ def load_model_and_tokenizer():
             return model, tokenizer
         except Exception as e:
             st.warning(f"⚠️ Method 2 failed: {e}")
-    
+   
     if model is None:
         try:
             st.warning("⚠️ No weights found. Using fresh model architecture.")
@@ -123,7 +122,7 @@ def load_model_and_tokenizer():
         except Exception as e:
             st.error(f"❌ Failed to build model: {e}")
             st.stop()
-    
+   
     return model, tokenizer
 
 model, tokenizer = load_model_and_tokenizer()
@@ -163,61 +162,96 @@ def extract_video_id(url):
         r'(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
         r'^([a-zA-Z0-9_-]{11})$'
     ]
-    
+   
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
             return match.group(1)
     return None
 
-def fetch_youtube_subtitles_method1(video_id):
-    """Method 1: youtube-transcript-api library - MOST RELIABLE"""
+# ============== NEW RELIABLE METHOD: Innertube API (No External Libs) ==============
+def fetch_youtube_subtitles_innertube(video_id):
+    """Method: Use YouTube Innertube API with urllib only (reliable in 2025)"""
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
+        import urllib.request
+        import xml.etree.ElementTree as ET
         
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # Step 1: Get Innertube API key from video page
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            html = response.read().decode('utf-8', errors='ignore')
         
-        # Try manual transcripts first (highest quality)
-        for lang in ['en', 'en-US', 'en-GB']:
-            try:
-                transcript = transcript_list.find_manually_created_transcript([lang])
-                data = transcript.fetch()
-                if data and len(data) > 10:  # Validate substantial content
-                    return data, "✅ Method 1 (Manual EN)"
-            except:
-                continue
+        m = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', html)
+        if not m:
+            return None, None
+        api_key = m.group(1)
         
-        # Try auto-generated English
-        for lang in ['en', 'en-US', 'en-GB']:
-            try:
-                transcript = transcript_list.find_generated_transcript([lang])
-                data = transcript.fetch()
-                if data and len(data) > 10:
-                    return data, "✅ Method 1 (Auto EN)"
-            except:
-                continue
+        # Step 2: POST to player endpoint for caption metadata
+        player_url = f"https://www.youtube.com/youtubei/v1/player?key={api_key}"
+        payload = {
+            "context": {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": "2.20241029.00.00",
+                    "hl": "en"
+                }
+            },
+            "videoId": video_id
+        }
+        data = json.dumps(payload).encode('utf-8')
+        player_headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': headers['User-Agent'],
+            'X-YouTube-Client-Name': '1',
+            'X-YouTube-Client-Version': '2.20241029.00.00',
+            'Origin': 'https://www.youtube.com',
+            'Referer': f'https://www.youtube.com/watch?v={video_id}'
+        }
+        req = urllib.request.Request(player_url, data=data, headers=player_headers, method='POST')
+        with urllib.request.urlopen(req, timeout=30) as response:
+            player_json = json.loads(response.read().decode('utf-8'))
         
-        # Try Hindi
-        for lang in ['hi', 'hi-IN']:
-            try:
-                transcript = transcript_list.find_manually_created_transcript([lang])
-                data = transcript.fetch()
-                if data and len(data) > 10:
-                    return data, "✅ Method 1 (Manual HI)"
-            except:
-                continue
+        # Step 3: Extract caption tracks
+        captions = player_json.get("captions", {})
+        if not captions:
+            return None, None
+        tracklist = captions.get("playerCaptionsTracklistRenderer", {})
+        tracks = tracklist.get("captionTracks", [])
+        if not tracks:
+            return None, None
         
-        # Try any available transcript
-        for transcript in transcript_list:
-            try:
-                data = transcript.fetch()
-                if data and len(data) > 10:
-                    return data, f"✅ Method 1 ({transcript.language_code})"
-            except:
-                continue
+        # Prefer manual transcripts in English/Hindi
+        langs = [('en', 'EN'), ('hi', 'HI')]
+        for lang_code, lang_name in langs:
+            # Manual first
+            for tr in tracks:
+                if tr.get("languageCode", "").startswith(lang_code) and tr.get("kind") != "asr":
+                    caption_url = tr["baseUrl"].rsplit('&fmt=', 1)[0]
+                    rows = download_and_parse_subtitle_url(caption_url)
+                    if rows and len(rows) > 10:
+                        return rows, f"✅ Innertube (Manual {lang_name})"
+            # Fallback to auto
+            for tr in tracks:
+                if tr.get("languageCode", "").startswith(lang_code):
+                    caption_url = tr["baseUrl"].rsplit('&fmt=', 1)[0]
+                    rows = download_and_parse_subtitle_url(caption_url)
+                    if rows and len(rows) > 10:
+                        return rows, f"✅ Innertube (Auto {lang_name})"
+        
+        # Any available
+        if tracks:
+            caption_url = tracks[0]["baseUrl"].rsplit('&fmt=', 1)[0]
+            rows = download_and_parse_subtitle_url(caption_url)
+            if rows and len(rows) > 10:
+                lang = tracks[0].get("languageCode", "unknown").upper()
+                return rows, f"✅ Innertube ({lang})"
         
     except Exception as e:
+        # Silent fail for now; log if needed
         pass
     
     return None, None
@@ -227,14 +261,14 @@ def download_and_parse_subtitle_url(url):
     try:
         import urllib.request
         import xml.etree.ElementTree as ET
-        
+       
         headers = {'User-Agent': 'Mozilla/5.0'}
         req = urllib.request.Request(url, headers=headers)
         response = urllib.request.urlopen(req, timeout=10)
         content = response.read().decode('utf-8', errors='ignore')
-        
+       
         rows = []
-        
+       
         # Try XML format (YouTube format)
         if '<text' in content or '<transcript>' in content:
             try:
@@ -252,7 +286,7 @@ def download_and_parse_subtitle_url(url):
                         })
             except:
                 pass
-        
+       
         # Try JSON format
         elif content.startswith('{') or content.startswith('['):
             try:
@@ -267,7 +301,7 @@ def download_and_parse_subtitle_url(url):
                             })
             except:
                 pass
-        
+       
         # Try VTT/SRT format
         else:
             lines = content.split('\n')
@@ -283,80 +317,36 @@ def download_and_parse_subtitle_url(url):
                         'duration': 2.0,
                         'text': line
                     })
-        
+       
         return rows if len(rows) > 10 else None
-        
+       
     except Exception as e:
         return None
 
-def fetch_youtube_subtitles_method2(video_id):
-    """Method 2: yt-dlp with proper subtitle download"""
-    try:
-        import yt_dlp
-        
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'skip_download': True,
-            'subtitleslangs': ['en', 'en-US', 'en-GB', 'hi'],
-            'subtitlesformat': 'json3/srv3/srv2/srv1/ttml/vtt',
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            
-            # Check subtitles (manual)
-            if 'subtitles' in info and info['subtitles']:
-                for lang in ['en', 'en-US', 'en-GB', 'hi']:
-                    if lang in info['subtitles']:
-                        sub_list = info['subtitles'][lang]
-                        for sub in sub_list:
-                            if 'url' in sub:
-                                rows = download_and_parse_subtitle_url(sub['url'])
-                                if rows and len(rows) > 10:
-                                    return rows, f"✅ Method 2 (Manual {lang})"
-            
-            # Check automatic captions
-            if 'automatic_captions' in info and info['automatic_captions']:
-                for lang in ['en', 'en-US', 'en-GB', 'hi']:
-                    if lang in info['automatic_captions']:
-                        sub_list = info['automatic_captions'][lang]
-                        for sub in sub_list:
-                            if 'url' in sub:
-                                rows = download_and_parse_subtitle_url(sub['url'])
-                                if rows and len(rows) > 10:
-                                    return rows, f"✅ Method 2 (Auto {lang})"
-        
-    except Exception as e:
-        pass
-    
-    return None, None
-
+# ============== FALLBACK METHOD: Direct web scraping from YouTube page ==============
 def fetch_youtube_subtitles_method3(video_id):
-    """Method 3: Direct web scraping from YouTube page"""
+    """Method: Direct web scraping from YouTube page (fallback)"""
     try:
         import urllib.request
         import xml.etree.ElementTree as ET
-        
+       
         url = f"https://www.youtube.com/watch?v={video_id}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        
+       
         req = urllib.request.Request(url, headers=headers)
         html = urllib.request.urlopen(req, timeout=10).read().decode('utf-8', errors='ignore')
-        
+       
         # Extract caption track URL
         if '"captions":' in html or '"captionTracks":' in html:
             # Find captionTracks JSON
             pattern = r'"captionTracks":\s*(\[.*?\])'
             match = re.search(pattern, html)
-            
+           
             if match:
                 try:
                     tracks_json = match.group(1)
                     tracks = json.loads(tracks_json)
-                    
+                   
                     # Try English first
                     for track in tracks:
                         if 'baseUrl' in track:
@@ -366,7 +356,7 @@ def fetch_youtube_subtitles_method3(video_id):
                                 rows = download_and_parse_subtitle_url(caption_url)
                                 if rows and len(rows) > 10:
                                     return rows, "✅ Method 3 (Web EN)"
-                    
+                   
                     # Try any available
                     for track in tracks:
                         if 'baseUrl' in track:
@@ -377,56 +367,51 @@ def fetch_youtube_subtitles_method3(video_id):
                                 return rows, f"✅ Method 3 (Web {lang})"
                 except:
                     pass
-        
+       
     except Exception as e:
         pass
-    
+   
     return None, None
 
 def fetch_youtube_subtitles(video_id):
-    """Try all methods to fetch subtitles"""
-    
-    # Method 1 is most reliable
-    subtitles, method = fetch_youtube_subtitles_method1(video_id)
+    """Try reliable methods to fetch subtitles (no external libs)"""
+   
+    # Primary: Innertube API (most reliable, no libs needed)
+    subtitles, method = fetch_youtube_subtitles_innertube(video_id)
     if subtitles and len(subtitles) > 10:
         return subtitles, method
-    
-    # Method 2 as backup
-    subtitles, method = fetch_youtube_subtitles_method2(video_id)
-    if subtitles and len(subtitles) > 10:
-        return subtitles, method
-    
-    # Method 3 as last resort
+   
+    # Fallback: Old web scraping
     subtitles, method = fetch_youtube_subtitles_method3(video_id)
     if subtitles and len(subtitles) > 10:
         return subtitles, method
-    
+   
     return None, None
 
 def youtube_to_dataframe(video_id):
     """Convert YouTube subtitles to DataFrame with validation"""
-    
+   
     subtitles, method = fetch_youtube_subtitles(video_id)
-    
+   
     if subtitles is None or len(subtitles) < 10:
-        return None, "❌ No valid subtitles found (tried all 3 methods)"
-    
+        return None, "❌ No valid subtitles found (tried Innertube + Web methods)"
+   
     rows = []
     for entry in subtitles:
         start = float(entry.get('start', 0))
         duration = float(entry.get('duration', entry.get('dur', 1)))
         text = str(entry.get('text', '')).strip()
-        
+       
         if text and duration > 0:  # Validate entry
             rows.append({
                 'start_time': start,
                 'end_time': start + duration,
                 'text': text
             })
-    
+   
     if len(rows) < 10:
         return None, f"❌ Insufficient subtitle data (only {len(rows)} entries found)"
-    
+   
     df = pd.DataFrame(rows)
     return df, method
 
@@ -444,7 +429,7 @@ def parse_srt(file):
     raw = file.read().decode("utf-8", errors="ignore")
     blocks = re.split(r'\n\s*\n', raw.strip())
     rows = []
-    
+   
     for b in blocks:
         lines = [l.strip() for l in b.splitlines() if l.strip()]
         if len(lines) >= 2 and "-->" in lines[1]:
@@ -458,7 +443,7 @@ def parse_srt(file):
                 rows.append({"start_time": start, "end_time": end, "text": text})
             except:
                 continue
-    
+   
     return pd.DataFrame(rows)
 
 def parse_txt(file):
@@ -466,101 +451,100 @@ def parse_txt(file):
     raw = file.read().decode("utf-8", errors="ignore")
     lines = raw.splitlines()
     rows = []
-    
+   
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        
+       
         m = re.match(r'^\[?(\d{2}):(\d{2}):(\d{2})\]?\s*(.*)$', line)
         if m:
             hh, mm, ss, text = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
             sec = hh*3600 + mm*60 + ss
             rows.append({"start_time": float(sec), "text": text})
             continue
-        
+       
         m2 = re.match(r'^\[?(\d{2}):(\d{2})\]?\s*(.*)$', line)
         if m2:
             mm, ss, text = int(m2.group(1)), int(m2.group(2)), m2.group(3)
             sec = mm*60 + ss
             rows.append({"start_time": float(sec), "text": text})
-    
+   
     if not rows:
         return pd.DataFrame()
-    
+   
     df = pd.DataFrame(rows).sort_values("start_time").reset_index(drop=True)
     df['end_time'] = df['start_time'].shift(-1) - 1.0
     df['end_time'] = df['end_time'].fillna(df['start_time'] + 1.0)
     df['end_time'] = df.apply(lambda r: max(r['end_time'], r['start_time'] + 0.5), axis=1)
-    
+   
     return df
 
 def compute_features(df):
     """Compute numeric features for model"""
     df = df.sort_values("start_time").reset_index(drop=True)
-    
+   
     df["duration"] = df["end_time"] - df["start_time"]
     df["gap"] = df["start_time"].shift(-1) - df["end_time"]
     df["gap"] = df["gap"].fillna(0.0)
-    
+   
     def ends_with_punct(t):
         return int(bool(re.search(r'[.!?…]$', str(t).strip())))
-    
+   
     def has_music_tag(t):
         return int(bool(re.search(r'\[(music|applause|door|sound)\]|\(music|applause|door|sound\)', str(t), re.IGNORECASE)))
-    
+   
     def is_shouting(t):
         words = str(t).split()
         if not words:
             return 0
         upper_ratio = sum(1 for w in words if w.isupper()) / len(words)
         return int('!' in str(t) or upper_ratio > 0.6)
-    
+   
     df["is_sentence_end"] = df["text"].apply(ends_with_punct)
     df["has_music_tag"] = df["text"].apply(has_music_tag)
     df["is_shouting"] = df["text"].apply(is_shouting)
-    
+   
     df["norm_gap"] = np.clip(df["gap"] / 6.0, 0, 1)
     df["norm_duration"] = np.clip(df["duration"] / 5.0, 0, 1)
-    
-
-    
+   
+   
     return df
 
 def select_ads(df, threshold=DEFAULT_THRESHOLD, min_spacing=DEFAULT_MIN_SPACING,
                intro_cut=INTRO_CUTOFF, end_cut=END_CUTOFF,
                window_seconds=WINDOW_SECONDS, window_max=WINDOW_MAX):
     """Select optimal ad placement positions"""
-    
+   
     movie_len = float(df['end_time'].max())
     min_ads = max(1, int(movie_len // 1800))
     max_ads = max(2, math.ceil(movie_len / 600.0))
-    
+   
     cands = df[(df['prob'] >= threshold) &
                (df['start_time'] > intro_cut) &
                (df['end_time'] < (movie_len - end_cut))].copy()
     cands = cands.sort_values(by='prob', ascending=False)
-    
+   
     selected = []
-    
+   
     for _, row in cands.iterrows():
         st = float(row['start_time'])
-        
+       
         if any(abs(st - s) < min_spacing for s in selected):
             continue
-        
+       
         window_count = sum(1 for s in selected if abs(s - st) < window_seconds)
         if window_count >= window_max:
             continue
-        
+       
         selected.append(st)
         if len(selected) >= max_ads:
             break
-    
+   
     if len(selected) < min_ads:
         fallback = df[(df['start_time'] > intro_cut) & 
                       (df['end_time'] < (movie_len - end_cut))].sort_values(by='ad_score', ascending=False)
-        
+       
         for _, row in fallback.iterrows():
             st = float(row['start_time'])
             if any(abs(st - s) < min_spacing for s in selected):
@@ -568,7 +552,7 @@ def select_ads(df, threshold=DEFAULT_THRESHOLD, min_spacing=DEFAULT_MIN_SPACING,
             selected.append(st)
             if len(selected) >= min_ads:
                 break
-    
+   
     selected = sorted(selected)[:max_ads]
     return selected
 
@@ -640,11 +624,11 @@ with tab1:
         type=["srt", "csv", "txt"],
         help="Supported: SRT, CSV (with start_time, end_time, text), TXT"
     )
-    
+   
     if uploaded:
         filetype = uploaded.name.split(".")[-1].lower()
         source_name = uploaded.name
-        
+       
         try:
             if filetype == "srt":
                 df = parse_srt(uploaded)
@@ -654,48 +638,48 @@ with tab1:
                 st.success("✅ TXT file parsed")
             else:
                 df = pd.read_csv(uploaded, low_memory=False)
-                
+               
                 if 'text' not in df.columns:
                     st.error("❌ CSV must contain 'text' column")
                     st.stop()
-                
+               
                 if 'start_time' not in df.columns:
                     st.error("❌ CSV must contain 'start_time' column")
                     st.stop()
-                
+               
                 if 'end_time' not in df.columns:
                     df = df.sort_values('start_time').reset_index(drop=True)
                     df['end_time'] = df['start_time'].shift(-1) - 1.0
                     df['end_time'] = df['end_time'].fillna(df['start_time'] + 1.0)
                     df['end_time'] = df.apply(lambda r: max(r['end_time'], r['start_time'] + 0.5), axis=1)
-                
+               
                 st.success("✅ CSV file parsed")
-        
+       
         except Exception as e:
             st.error(f"❌ Failed to parse file: {e}")
             st.stop()
 
 with tab2:
     st.markdown("**Paste YouTube video URL or ID**")
-    
-    
+   
+   
     youtube_input = st.text_input(
         "YouTube URL or Video ID",
         placeholder="https://www.youtube.com/watch?v=VIDEO_ID or just VIDEO_ID",
         help="Paste full YouTube URL or just the 11-character video ID"
     )
-    
+   
     if youtube_input and youtube_input.strip():
         video_id = extract_video_id(youtube_input.strip())
-        
+       
         if not video_id:
             st.error("❌ Invalid YouTube URL or Video ID")
         else:
             st.info(f"🎥 Video ID: `{video_id}`")
-            
+           
             with st.spinner("⏳ Fetching subtitles..."):
                 df, method = youtube_to_dataframe(video_id)
-            
+           
             if df is None:
                 st.error(f"{method}")
                 st.markdown("""
@@ -704,7 +688,7 @@ with tab2:
                 - Captions are disabled by the uploader
                 - Video is private or age-restricted
                 - Network connectivity issue
-                
+               
                 **Try:**
                 - Wait 1-2 minutes and try again
                 - Try a different YouTube video
@@ -721,7 +705,7 @@ if df is None or df.empty:
     st.markdown("""
     ---
     **Supported Formats:**
-    - **YouTube**: Automatically fetches captions/subtitles
+    - **YouTube**: Automatically fetches captions/subtitles (using standard libs only)
     - **SRT**: Standard subtitle format (00:00:00,000 --> 00:00:05,000)
     - **TXT**: Time-stamped format ([HH:MM:SS] text or [MM:SS] text)
     - **CSV**: Must have columns: start_time, end_time, text
@@ -730,43 +714,43 @@ else:
     if len(df) < 10:
         st.error(f"❌ Insufficient subtitle data: only {len(df)} rows found. Need at least 10 rows.")
         st.stop()
-    
+   
     df = compute_features(df)
-    
+   
     movie_length = float(df['end_time'].max())
     movie_length_min = movie_length / 60.0
-    
+   
     st.success(f"✅ Loaded {len(df)} subtitle rows | Video: {sec_to_time(movie_length)} ({movie_length_min:.1f} mins)")
-    
+   
     # ============== MODEL PREDICTION ==============
     st.markdown("### 🧠 Running Model Prediction...")
     progress_bar = st.progress(0)
-    
+   
     seqs = tokenizer.texts_to_sequences(df['text'].astype(str).values)
     X_text = pad_sequences(seqs, maxlen=MAX_LEN, padding='post', truncating='post')
-    
+   
     X_num = df[['norm_gap', 'norm_duration', 'is_sentence_end', 'has_music_tag', 'is_shouting']].values.astype(np.float32)
-    
+   
     progress_bar.progress(50)
     df['prob'] = model.predict([X_text, X_num], batch_size=256, verbose=0).reshape(-1)
     progress_bar.progress(100)
     progress_bar.empty()
-    
+   
     st.success("✅ Predictions complete!")
-    
+   
     # ============== SIDEBAR INFO ==============
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Analysis Info")
     st.sidebar.metric("🎞️ Video Length", sec_to_time(movie_length))
     st.sidebar.metric("📝 Subtitle Rows", len(df))
-    
+   
     raw_candidates = df[
         (df['prob'] >= threshold) & 
         (df['start_time'] > intro_cut) & 
         (df['end_time'] < (movie_length - end_cut))
     ]
     st.sidebar.metric("🎯 Raw Candidates (prob≥threshold)", len(raw_candidates))
-    
+   
     # ============== SELECT ADS ==============
     selected = select_ads(
         df,
@@ -777,26 +761,26 @@ else:
         window_seconds=WINDOW_SECONDS,
         window_max=WINDOW_MAX
     )
-    
+   
     # Build output dataframe
     out = []
     for t in selected:
         row = df.iloc[(df['start_time'] - t).abs().argsort()[:1]].iloc[0]
-        
-
-        
+       
+       
+       
         out.append({
             'Ad Time': sec_to_time(t),
             'Seconds': round(float(t), 2),
             'Model Prob': f"{float(row['prob']):.3f}",
             'Text': row['text'][:50] + "..." if len(str(row['text'])) > 50 else row['text']
         })
-    
+   
     df_out = pd.DataFrame(out)
-    
+   
     # ============== RESULTS ==============
     st.markdown("### 🎯 Suggested Ad Placements")
-    
+   
     if df_out.empty:
         st.warning("⚠️ No ad placements suggested. Try:")
         st.markdown("""
@@ -806,40 +790,40 @@ else:
         """)
     else:
         st.dataframe(df_out, use_container_width=True, height=400)
-        
+       
         st.sidebar.markdown("---")
         st.sidebar.subheader("📈 Summary")
         st.sidebar.metric("🎞️ Total Video Length", sec_to_time(movie_length))
         st.sidebar.metric("📍 Ads Suggested", len(df_out))
-        
+       
         if len(df_out) > 0:
             avg_gap = int(movie_length / len(df_out))
             st.sidebar.metric("🕒 Avg Seconds/Ad", f"{avg_gap}s")
-        
+       
         st.markdown("### 🕒 Ad Placement Timeline")
         fig, ax = plt.subplots(figsize=(12, 2))
         ax.set_facecolor("#0e1117")
         fig.patch.set_facecolor("#0e1117")
-        
+       
         ax.set_xlim(0, movie_length if movie_length > 0 else 1)
         ax.set_ylim(0, 1)
-        
+       
         ax.barh(0.5, movie_length, height=0.1, color="#333333", alpha=0.5)
-        
+       
         for i, t in enumerate(selected):
             ax.scatter(t, 0.5, s=200, color="#00FFAA", marker='|', linewidth=3, zorder=10)
             ax.text(t, 0.7, f"Ad {i+1}", ha='center', fontsize=8, color="#00FFAA")
-        
+       
         ax.axvline(intro_cut, color="#FF6666", linestyle='--', linewidth=2, alpha=0.5, label="Intro cutoff")
         ax.axvline(movie_length - end_cut, color="#FF6666", linestyle='--', linewidth=2, alpha=0.5, label="End cutoff")
-        
+       
         ax.set_xlabel("Time (seconds)", color="white")
         ax.set_yticks([])
         ax.tick_params(colors="gray")
         ax.legend(loc='upper right', facecolor="#1e1e1e", edgecolor="#555")
-        
+       
         st.pyplot(fig, use_container_width=True)
-        
+       
         csv_data = df_out.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Results as CSV",
