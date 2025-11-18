@@ -15,9 +15,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============== CONFIG ==============
-MODEL_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.h5"
-WEIGHTS_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\bilstm_ad_model.weights.h5"
-TOKENIZER_PATH = r"bilstm_model_v3_balanced-20251112T130342Z-1-001\bilstm_model_v3_balanced\tokenizer.pkl"
+MODEL_PATH = r"bilstm_ad_model.h5"
+WEIGHTS_PATH = r"bilstm_ad_model.weights.h5"
+TOKENIZER_PATH = r"tokenizer.pkl"
 VOCAB_SIZE = 8000
 MAX_LEN = 25
 
