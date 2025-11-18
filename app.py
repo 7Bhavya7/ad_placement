@@ -1,4 +1,4 @@
-# app.py — FIXED VERSION with Proper YouTube Subtitle Extraction (No External Libs)
+# app.py — FIXED VERSION with Proper YouTube Subtitle Extraction
 import streamlit as st
 st.set_page_config(page_title="🎬 Smart Ad Placement", layout="wide", initial_sidebar_state="expanded")
 
@@ -170,6 +170,58 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
+def fetch_youtube_subtitles_method1(video_id):
+    """Method 1: youtube-transcript-api library - MOST RELIABLE"""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
+        
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # Try manual transcripts first (highest quality)
+        for lang in ['en', 'en-US', 'en-GB']:
+            try:
+                transcript = transcript_list.find_manually_created_transcript([lang])
+                data = transcript.fetch()
+                if data and len(data) > 10:  # Validate substantial content
+                    return data, "✅ Method 1 (Manual EN)"
+            except:
+                continue
+        
+        # Try auto-generated English
+        for lang in ['en', 'en-US', 'en-GB']:
+            try:
+                transcript = transcript_list.find_generated_transcript([lang])
+                data = transcript.fetch()
+                if data and len(data) > 10:
+                    return data, "✅ Method 1 (Auto EN)"
+            except:
+                continue
+        
+        # Try Hindi
+        for lang in ['hi', 'hi-IN']:
+            try:
+                transcript = transcript_list.find_manually_created_transcript([lang])
+                data = transcript.fetch()
+                if data and len(data) > 10:
+                    return data, "✅ Method 1 (Manual HI)"
+            except:
+                continue
+        
+        # Try any available transcript
+        for transcript in transcript_list:
+            try:
+                data = transcript.fetch()
+                if data and len(data) > 10:
+                    return data, f"✅ Method 1 ({transcript.language_code})"
+            except:
+                continue
+        
+    except Exception as e:
+        pass
+    
+    return None, None
+
 def download_and_parse_subtitle_url(url):
     """Download subtitle file from URL and parse it"""
     try:
@@ -237,95 +289,53 @@ def download_and_parse_subtitle_url(url):
     except Exception as e:
         return None
 
-# ============== PRIMARY METHOD: Innertube API (No External Libs) ==============
-def fetch_youtube_subtitles_innertube(video_id):
-    """Primary Method: Use YouTube Innertube API with urllib only (reliable in 2025)"""
+def fetch_youtube_subtitles_method2(video_id):
+    """Method 2: yt-dlp with proper subtitle download"""
     try:
-        import urllib.request
-        import xml.etree.ElementTree as ET
+        import yt_dlp
         
-        # Step 1: Get Innertube API key from video page
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'skip_download': True,
+            'subtitleslangs': ['en', 'en-US', 'en-GB', 'hi'],
+            'subtitlesformat': 'json3/srv3/srv2/srv1/ttml/vtt',
         }
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            html = response.read().decode('utf-8', errors='ignore')
         
-        m = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', html)
-        if not m:
-            return None, None
-        api_key = m.group(1)
-        
-        # Step 2: POST to player endpoint for caption metadata
-        player_url = f"https://www.youtube.com/youtubei/v1/player?key={api_key}"
-        payload = {
-            "context": {
-                "client": {
-                    "clientName": "WEB",
-                    "clientVersion": "2.20241029.00.00",
-                    "hl": "en"
-                }
-            },
-            "videoId": video_id
-        }
-        data = json.dumps(payload).encode('utf-8')
-        player_headers = {
-            'Content-Type': 'application/json',
-            'User-Agent': headers['User-Agent'],
-            'X-YouTube-Client-Name': '1',
-            'X-YouTube-Client-Version': '2.20241029.00.00',
-            'Origin': 'https://www.youtube.com',
-            'Referer': f'https://www.youtube.com/watch?v={video_id}'
-        }
-        req = urllib.request.Request(player_url, data=data, headers=player_headers, method='POST')
-        with urllib.request.urlopen(req, timeout=30) as response:
-            player_json = json.loads(response.read().decode('utf-8'))
-        
-        # Step 3: Extract caption tracks
-        captions = player_json.get("captions", {})
-        if not captions:
-            return None, None
-        tracklist = captions.get("playerCaptionsTracklistRenderer", {})
-        tracks = tracklist.get("captionTracks", [])
-        if not tracks:
-            return None, None
-        
-        # Prefer manual transcripts in English/Hindi
-        langs = [('en', 'EN'), ('hi', 'HI')]
-        for lang_code, lang_name in langs:
-            # Manual first
-            for tr in tracks:
-                if tr.get("languageCode", "").startswith(lang_code) and tr.get("kind") != "asr":
-                    caption_url = tr["baseUrl"].rsplit('&fmt=', 1)[0]
-                    rows = download_and_parse_subtitle_url(caption_url)
-                    if rows and len(rows) > 10:
-                        return rows, f"✅ Innertube (Manual {lang_name})"
-            # Fallback to auto
-            for tr in tracks:
-                if tr.get("languageCode", "").startswith(lang_code):
-                    caption_url = tr["baseUrl"].rsplit('&fmt=', 1)[0]
-                    rows = download_and_parse_subtitle_url(caption_url)
-                    if rows and len(rows) > 10:
-                        return rows, f"✅ Innertube (Auto {lang_name})"
-        
-        # Any available
-        if tracks:
-            caption_url = tracks[0]["baseUrl"].rsplit('&fmt=', 1)[0]
-            rows = download_and_parse_subtitle_url(caption_url)
-            if rows and len(rows) > 10:
-                lang = tracks[0].get("languageCode", "unknown")
-                return rows, f"✅ Innertube (Web {lang})"
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            
+            # Check subtitles (manual)
+            if 'subtitles' in info and info['subtitles']:
+                for lang in ['en', 'en-US', 'en-GB', 'hi']:
+                    if lang in info['subtitles']:
+                        sub_list = info['subtitles'][lang]
+                        for sub in sub_list:
+                            if 'url' in sub:
+                                rows = download_and_parse_subtitle_url(sub['url'])
+                                if rows and len(rows) > 10:
+                                    return rows, f"✅ Method 2 (Manual {lang})"
+            
+            # Check automatic captions
+            if 'automatic_captions' in info and info['automatic_captions']:
+                for lang in ['en', 'en-US', 'en-GB', 'hi']:
+                    if lang in info['automatic_captions']:
+                        sub_list = info['automatic_captions'][lang]
+                        for sub in sub_list:
+                            if 'url' in sub:
+                                rows = download_and_parse_subtitle_url(sub['url'])
+                                if rows and len(rows) > 10:
+                                    return rows, f"✅ Method 2 (Auto {lang})"
         
     except Exception as e:
         pass
     
     return None, None
 
-# ============== FALLBACK METHOD: Direct web scraping ==============
-def fetch_youtube_subtitles_web(video_id):
-    """Fallback: Direct web scraping from YouTube page"""
+def fetch_youtube_subtitles_method3(video_id):
+    """Method 3: Direct web scraping from YouTube page"""
     try:
         import urllib.request
         import xml.etree.ElementTree as ET
@@ -355,7 +365,7 @@ def fetch_youtube_subtitles_web(video_id):
                                 caption_url = track['baseUrl']
                                 rows = download_and_parse_subtitle_url(caption_url)
                                 if rows and len(rows) > 10:
-                                    return rows, "✅ Web (EN)"
+                                    return rows, "✅ Method 3 (Web EN)"
                     
                     # Try any available
                     for track in tracks:
@@ -364,7 +374,7 @@ def fetch_youtube_subtitles_web(video_id):
                             rows = download_and_parse_subtitle_url(caption_url)
                             if rows and len(rows) > 10:
                                 lang = track.get('languageCode', 'unknown')
-                                return rows, f"✅ Web ({lang})"
+                                return rows, f"✅ Method 3 (Web {lang})"
                 except:
                     pass
         
@@ -374,15 +384,20 @@ def fetch_youtube_subtitles_web(video_id):
     return None, None
 
 def fetch_youtube_subtitles(video_id):
-    """Try reliable methods to fetch subtitles (standard libs only)"""
+    """Try all methods to fetch subtitles"""
     
-    # Primary: Innertube API
-    subtitles, method = fetch_youtube_subtitles_innertube(video_id)
+    # Method 1 is most reliable
+    subtitles, method = fetch_youtube_subtitles_method1(video_id)
     if subtitles and len(subtitles) > 10:
         return subtitles, method
     
-    # Fallback: Web scraping
-    subtitles, method = fetch_youtube_subtitles_web(video_id)
+    # Method 2 as backup
+    subtitles, method = fetch_youtube_subtitles_method2(video_id)
+    if subtitles and len(subtitles) > 10:
+        return subtitles, method
+    
+    # Method 3 as last resort
+    subtitles, method = fetch_youtube_subtitles_method3(video_id)
     if subtitles and len(subtitles) > 10:
         return subtitles, method
     
@@ -394,7 +409,7 @@ def youtube_to_dataframe(video_id):
     subtitles, method = fetch_youtube_subtitles(video_id)
     
     if subtitles is None or len(subtitles) < 10:
-        return None, "❌ No valid subtitles found (tried Innertube + Web methods)"
+        return None, "❌ No valid subtitles found (tried all 3 methods)"
     
     rows = []
     for entry in subtitles:
@@ -683,7 +698,7 @@ with tab2:
         else:
             st.info(f"🎥 Video ID: `{video_id}`")
             
-            with st.spinner("⏳ Fetching subtitles..."):
+            with st.spinner("⏳ Fetching subtitles (trying 3 methods sequentially)..."):
                 df, method = youtube_to_dataframe(video_id)
             
             if df is None:
@@ -711,7 +726,7 @@ if df is None or df.empty:
     st.markdown("""
     ---
     **Supported Formats:**
-    - **YouTube**: Automatically fetches captions/subtitles (using standard libs only)
+    - **YouTube**: Automatically fetches captions/subtitles
     - **SRT**: Standard subtitle format (00:00:00,000 --> 00:00:05,000)
     - **TXT**: Time-stamped format ([HH:MM:SS] text or [MM:SS] text)
     - **CSV**: Must have columns: start_time, end_time, text
@@ -779,6 +794,7 @@ else:
             'Ad Time': sec_to_time(t),
             'Seconds': round(float(t), 2),
             'Model Prob': f"{float(row['prob']):.3f}",
+
             'Text': row['text'][:50] + "..." if len(str(row['text'])) > 50 else row['text']
         })
     
